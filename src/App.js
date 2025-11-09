@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, AlertCircle } from 'lucide-react';
+import MonteCarlo from './MonteCarlo';
 
 export default function StockReturnCalculator() {
     const [activeTab, setActiveTab] = useState('historical');
@@ -10,10 +11,51 @@ export default function StockReturnCalculator() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    // Monte Carlo specific state
-    const [mcSimulations, setMcSimulations] = useState(1000);
-    const [mcYears, setMcYears] = useState(10);
-    const [mcResults, setMcResults] = useState(null);
+    // Portfolio Management state
+    const [portfolio, setPortfolio] = useState([]);
+    const [newStock, setNewStock] = useState({ ticker: '', quantity: '', price: '' });
+
+    // New state for live market price
+    const [actualPrice, setActualPrice] = useState(null);
+    const [priceLoading, setPriceLoading] = useState(false);
+    const [priceError, setPriceError] = useState('');
+
+    const fetchMarketPrice = async () => {
+        if (!ticker || !ticker.trim()) {
+            setPriceError('Please enter a stock ticker');
+            return;
+        }
+        setPriceLoading(true);
+        setPriceError('');
+        setActualPrice(null);
+
+        try {
+            const resp = await fetch(
+                `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=d46lcd9r01qgc9etd3k0d46lcd9r01qgc9etd3kg`
+            );
+
+            if (!resp.ok) throw new Error(`Network error: ${resp.status}`);
+            const data = await resp.json();
+
+            // Finnhub returns fields like c (current), d (change), dp (percent)
+            setActualPrice({
+                price: data.c ?? null,
+                change: data.d ?? null,
+                changePct: data.dp ?? null,
+                high: data.h ?? null,
+                low: data.l ?? null,
+                open: data.o ?? null,
+                prevClose: data.pc ?? null,
+                time: new Date().toLocaleString(),
+                currency: 'USD'
+            });
+        } catch (e) {
+            setPriceError('Could not fetch live data. ' + e.message);
+            setActualPrice(null);
+        } finally {
+            setPriceLoading(false);
+        }
+    };
 
     const generateSampleData = (tickerSymbol, numYears) => {
         const endDate = new Date();
@@ -65,98 +107,6 @@ export default function StockReturnCalculator() {
         };
     };
 
-    const runMonteCarloSimulation = (tickerSymbol, numSimulations, numYears) => {
-        // Use realistic market parameters (based on historical S&P 500)
-        const avgAnnualReturn = 0.10; // 10% average return
-        const annualVolatility = 0.18; // 18% volatility
-        const initialInvestment = 10000;
-
-        const simulations = [];
-        const finalValues = [];
-
-        // Run simulations
-        for (let sim = 0; sim < numSimulations; sim++) {
-            let value = initialInvestment;
-            const path = [{ year: 0, value: value }];
-
-            for (let year = 1; year <= numYears; year++) {
-                // Generate random return using normal distribution approximation
-                const u1 = Math.random();
-                const u2 = Math.random();
-                const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-
-                const yearReturn = avgAnnualReturn + (annualVolatility * z);
-                value *= (1 + yearReturn);
-
-                path.push({ year, value: parseFloat(value.toFixed(2)) });
-            }
-
-            simulations.push(path);
-            finalValues.push(value);
-        }
-
-        // Calculate percentiles
-        const sortedFinalValues = [...finalValues].sort((a, b) => a - b);
-        const getPercentile = (p) => sortedFinalValues[Math.floor(numSimulations * p)];
-
-        const percentiles = {
-            p10: getPercentile(0.10),
-            p25: getPercentile(0.25),
-            p50: getPercentile(0.50),
-            p75: getPercentile(0.75),
-            p90: getPercentile(0.90)
-        };
-
-        // Create distribution data for histogram
-        const numBins = 30;
-        const min = Math.min(...finalValues);
-        const max = Math.max(...finalValues);
-        const binSize = (max - min) / numBins;
-
-        const distribution = [];
-        for (let i = 0; i < numBins; i++) {
-            const binStart = min + (i * binSize);
-            const binEnd = binStart + binSize;
-            const count = finalValues.filter(v => v >= binStart && v < binEnd).length;
-            distribution.push({
-                range: `$${(binStart / 1000).toFixed(0)}k`,
-                count: count,
-                percentage: ((count / numSimulations) * 100).toFixed(1)
-            });
-        }
-
-        // Select representative paths for visualization
-        const selectedPaths = [
-            simulations[sortedFinalValues.indexOf(percentiles.p10)],
-            simulations[sortedFinalValues.indexOf(percentiles.p25)],
-            simulations[sortedFinalValues.indexOf(percentiles.p50)],
-            simulations[sortedFinalValues.indexOf(percentiles.p75)],
-            simulations[sortedFinalValues.indexOf(percentiles.p90)]
-        ];
-
-        // Combine paths for chart
-        const chartData = [];
-        for (let year = 0; year <= numYears; year++) {
-            const dataPoint = { year };
-            selectedPaths.forEach((path, idx) => {
-                const percentileNames = ['p10', 'p25', 'p50', 'p75', 'p90'];
-                dataPoint[percentileNames[idx]] = path[year].value;
-            });
-            chartData.push(dataPoint);
-        }
-
-        return {
-            ticker: tickerSymbol.toUpperCase(),
-            initialInvestment,
-            finalValues,
-            percentiles,
-            distribution,
-            chartData,
-            avgFinalValue: finalValues.reduce((a, b) => a + b, 0) / numSimulations,
-            probProfit: (finalValues.filter(v => v > initialInvestment).length / numSimulations) * 100
-        };
-    };
-
     const handleCalculate = () => {
         if (!ticker.trim()) {
             setError('Please enter a stock ticker');
@@ -171,22 +121,6 @@ export default function StockReturnCalculator() {
             setResults(data);
             setLoading(false);
         }, 800);
-    };
-
-    const handleMonteCarloSimulation = () => {
-        if (!ticker.trim()) {
-            setError('Please enter a stock ticker');
-            return;
-        }
-
-        setLoading(true);
-        setError('');
-
-        setTimeout(() => {
-            const data = runMonteCarloSimulation(ticker, mcSimulations, mcYears);
-            setMcResults(data);
-            setLoading(false);
-        }, 1000);
     };
 
     return (
@@ -232,6 +166,22 @@ export default function StockReturnCalculator() {
                     >
                         Monte Carlo Simulation
                     </button>
+                    <button
+                        onClick={() => setActiveTab('portfolio')}
+                        style={{
+                            padding: '12px 24px',
+                            backgroundColor: activeTab === 'portfolio' ? '#2563eb' : 'transparent',
+                            color: activeTab === 'portfolio' ? 'white' : '#6b7280',
+                            border: 'none',
+                            borderRadius: '8px 8px 0 0',
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        Portfolio Management
+                    </button>
                 </div>
 
                 {/* Historical Analysis Tab */}
@@ -276,23 +226,64 @@ export default function StockReturnCalculator() {
                                 </select>
                             </div>
 
-                            <button
-                                onClick={handleCalculate}
-                                disabled={loading}
-                                style={{
-                                    padding: '10px 24px',
-                                    backgroundColor: loading ? '#9ca3af' : '#2563eb',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    fontSize: '14px',
-                                    fontWeight: '500',
-                                    cursor: loading ? 'not-allowed' : 'pointer',
-                                    marginBottom: '16px'
-                                }}
-                            >
-                                {loading ? 'Calculating...' : 'Calculate Returns'}
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
+                                <button
+                                    onClick={handleCalculate}
+                                    disabled={loading}
+                                    style={{
+                                        padding: '10px 24px',
+                                        backgroundColor: loading ? '#9ca3af' : '#2563eb',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        fontSize: '14px',
+                                        fontWeight: '500',
+                                        cursor: loading ? 'not-allowed' : 'pointer'
+                                    }}
+                                >
+                                    {loading ? 'Calculating...' : 'Calculate Returns'}
+                                </button>
+
+                                <button
+                                    onClick={fetchMarketPrice}
+                                    disabled={priceLoading || !ticker.trim()}
+                                    style={{
+                                        padding: '10px 18px',
+                                        backgroundColor: priceLoading ? '#9ca3af' : '#10b981',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        fontSize: '14px',
+                                        fontWeight: '500',
+                                        cursor: priceLoading ? 'not-allowed' : 'pointer'
+                                    }}
+                                >
+                                    {priceLoading ? 'Fetching...' : 'Get Live Price'}
+                                </button>
+                            </div>
+
+                            {priceError && (
+                                <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '4px', color: '#991b1b' }}>
+                                    <AlertCircle size={16} /> <span style={{ marginLeft: 8 }}>{priceError}</span>
+                                </div>
+                            )}
+
+                            {actualPrice && (
+                                <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>Current Price ({actualPrice.currency || 'USD'})</div>
+                                            <div style={{ fontSize: '20px', fontWeight: '700' }}>${actualPrice.price?.toLocaleString()}</div>
+                                        </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>{actualPrice.time}</div>
+                                            <div style={{ fontSize: '14px', fontWeight: '700', color: actualPrice.change >= 0 ? '#16a34a' : '#dc2626' }}>
+                                                {actualPrice.change >= 0 ? '+' : ''}{actualPrice.change?.toFixed(2)} ({actualPrice.changePct?.toFixed(2)}%)
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {error && (
                                 <div style={{
@@ -422,214 +413,135 @@ export default function StockReturnCalculator() {
 
                 {/* Monte Carlo Tab */}
                 {activeTab === 'montecarlo' && (
-                    <>
-                        {/* Input Section */}
-                        <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                            <div style={{ marginBottom: '16px' }}>
-                                <label style={{ display: 'block', fontWeight: '500', marginBottom: '8px' }}>Stock Ticker</label>
+                    <MonteCarlo ticker={ticker} setTicker={setTicker} />
+                )}
+
+                {/* Portfolio Management Tab */}
+                {activeTab === 'portfolio' && (
+                    <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                        {/* Add New Stock Form */}
+                        <div style={{ marginBottom: '24px' }}>
+                            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Add New Position</h3>
+                            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
                                 <input
                                     type="text"
-                                    value={ticker}
-                                    onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                                    placeholder="SPY"
+                                    placeholder="Ticker"
+                                    value={newStock.ticker}
+                                    onChange={(e) => setNewStock({ ...newStock, ticker: e.target.value.toUpperCase() })}
                                     style={{
-                                        width: '200px',
                                         padding: '8px 12px',
                                         border: '1px solid #d1d5db',
                                         borderRadius: '4px',
-                                        fontSize: '14px'
+                                        width: '120px'
                                     }}
                                 />
-                            </div>
-
-                            <div style={{ marginBottom: '16px' }}>
-                                <label style={{ display: 'block', fontWeight: '500', marginBottom: '8px' }}>Number of Simulations</label>
-                                <select
-                                    value={mcSimulations}
-                                    onChange={(e) => setMcSimulations(Number(e.target.value))}
+                                <input
+                                    type="number"
+                                    placeholder="Quantity"
+                                    value={newStock.quantity}
+                                    onChange={(e) => setNewStock({ ...newStock, quantity: e.target.value })}
                                     style={{
                                         padding: '8px 12px',
                                         border: '1px solid #d1d5db',
                                         borderRadius: '4px',
-                                        fontSize: '14px'
+                                        width: '120px'
                                     }}
-                                >
-                                    <option value={100}>100</option>
-                                    <option value={500}>500</option>
-                                    <option value={1000}>1,000</option>
-                                    <option value={5000}>5,000</option>
-                                    <option value={10000}>10,000</option>
-                                </select>
-                            </div>
-
-                            <div style={{ marginBottom: '16px' }}>
-                                <label style={{ display: 'block', fontWeight: '500', marginBottom: '8px' }}>Investment Horizon (Years)</label>
-                                <select
-                                    value={mcYears}
-                                    onChange={(e) => setMcYears(Number(e.target.value))}
+                                />
+                                <input
+                                    type="number"
+                                    placeholder="Price per share"
+                                    value={newStock.price}
+                                    onChange={(e) => setNewStock({ ...newStock, price: e.target.value })}
                                     style={{
                                         padding: '8px 12px',
                                         border: '1px solid #d1d5db',
                                         borderRadius: '4px',
-                                        fontSize: '14px'
+                                        width: '120px'
+                                    }}
+                                />
+                                <button
+                                    onClick={() => {
+                                        if (newStock.ticker && newStock.quantity && newStock.price) {
+                                            setPortfolio([...portfolio, {
+                                                ...newStock,
+                                                value: newStock.quantity * newStock.price
+                                            }]);
+                                            setNewStock({ ticker: '', quantity: '', price: '' });
+                                        }
+                                    }}
+                                    style={{
+                                        padding: '8px 16px',
+                                        backgroundColor: '#2563eb',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer'
                                     }}
                                 >
-                                    <option value={5}>5 Years</option>
-                                    <option value={10}>10 Years</option>
-                                    <option value={15}>15 Years</option>
-                                    <option value={20}>20 Years</option>
-                                    <option value={30}>30 Years</option>
-                                </select>
+                                    Add Position
+                                </button>
                             </div>
+                        </div>
 
-                            <button
-                                onClick={handleMonteCarloSimulation}
-                                disabled={loading}
-                                style={{
-                                    padding: '10px 24px',
-                                    backgroundColor: loading ? '#9ca3af' : '#2563eb',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    fontSize: '14px',
-                                    fontWeight: '500',
-                                    cursor: loading ? 'not-allowed' : 'pointer',
-                                    marginBottom: '16px'
-                                }}
-                            >
-                                {loading ? 'Running Simulation...' : 'Run Simulation'}
-                            </button>
-
-                            {error && (
-                                <div style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    padding: '12px',
-                                    backgroundColor: '#fee2e2',
-                                    border: '1px solid #fecaca',
-                                    borderRadius: '4px',
-                                    color: '#991b1b',
-                                    marginBottom: '16px'
-                                }}>
-                                    <AlertCircle size={20} />
-                                    <span>{error}</span>
-                                </div>
-                            )}
-
+                        {/* Portfolio Summary */}
+                        <div style={{ marginBottom: '24px' }}>
+                            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Portfolio Summary</h3>
                             <div style={{
-                                display: 'flex',
-                                alignItems: 'start',
-                                gap: '8px',
-                                padding: '12px',
-                                backgroundColor: '#dbeafe',
-                                border: '1px solid #93c5fd',
-                                borderRadius: '4px',
-                                fontSize: '13px'
+                                padding: '16px',
+                                backgroundColor: '#f8fafc',
+                                borderRadius: '8px',
+                                marginBottom: '16px'
                             }}>
-                                <AlertCircle size={20} color="#1e40af" style={{ flexShrink: 0 }} />
-                                <div>
-                                    <strong>About Monte Carlo:</strong> This simulation runs thousands of possible scenarios based on historical market returns (10% avg, 18% volatility) to show the range of potential outcomes for your investment.
+                                <div style={{ fontSize: '14px', color: '#6b7280' }}>Total Portfolio Value</div>
+                                <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                                    ${portfolio.reduce((sum, stock) => sum + (stock.quantity * stock.price), 0).toLocaleString()}
                                 </div>
                             </div>
                         </div>
 
-                        {/* Monte Carlo Results */}
-                        {mcResults && (
-                            <>
-                                <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px' }}>
-                                    {mcResults.ticker} - {mcYears} Year Projection ({mcSimulations.toLocaleString()} Simulations)
-                                </h2>
-
-                                {/* Key Metrics */}
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
-                                    <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                        <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Initial Investment</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 'bold' }}>${mcResults.initialInvestment.toLocaleString()}</div>
-                                    </div>
-                                    <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                        <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Average Final Value</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 'bold' }}>${mcResults.avgFinalValue.toFixed(0).toLocaleString()}</div>
-                                    </div>
-                                    <div style={{ padding: '16px', backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                        <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>Probability of Profit</div>
-                                        <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#16a34a' }}>{mcResults.probProfit.toFixed(1)}%</div>
-                                    </div>
-                                </div>
-
-                                {/* Percentiles */}
-                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Outcome Percentiles</h3>
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
-                                        <div style={{ padding: '12px', backgroundColor: '#fef2f2', borderRadius: '8px', textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>10th Percentile</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${mcResults.percentiles.p10.toFixed(0).toLocaleString()}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Worst 10%</div>
-                                        </div>
-                                        <div style={{ padding: '12px', backgroundColor: '#fef9c3', borderRadius: '8px', textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>25th Percentile</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${mcResults.percentiles.p25.toFixed(0).toLocaleString()}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Below average</div>
-                                        </div>
-                                        <div style={{ padding: '12px', backgroundColor: '#dbeafe', borderRadius: '8px', textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>50th Percentile</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${mcResults.percentiles.p50.toFixed(0).toLocaleString()}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Median</div>
-                                        </div>
-                                        <div style={{ padding: '12px', backgroundColor: '#dcfce7', borderRadius: '8px', textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>75th Percentile</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${mcResults.percentiles.p75.toFixed(0).toLocaleString()}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Above average</div>
-                                        </div>
-                                        <div style={{ padding: '12px', backgroundColor: '#f0fdf4', borderRadius: '8px', textAlign: 'center' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>90th Percentile</div>
-                                            <div style={{ fontSize: '16px', fontWeight: 'bold' }}>${mcResults.percentiles.p90.toFixed(0).toLocaleString()}</div>
-                                            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>Best 10%</div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Simulation Paths Chart */}
-                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Projected Growth Paths</h3>
-                                    <ResponsiveContainer width="100%" height={350}>
-                                        <LineChart data={mcResults.chartData}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis dataKey="year" label={{ value: 'Years', position: 'insideBottom', offset: -5 }} />
-                                            <YAxis label={{ value: 'Portfolio Value ($)', angle: -90, position: 'insideLeft' }} />
-                                            <Tooltip formatter={(value) => `${value.toLocaleString()}`} />
-                                            <Legend />
-                                            <Line type="monotone" dataKey="p10" stroke="#dc2626" strokeWidth={2} dot={false} name="10th Percentile (Worst)" />
-                                            <Line type="monotone" dataKey="p25" stroke="#f59e0b" strokeWidth={2} dot={false} name="25th Percentile" />
-                                            <Line type="monotone" dataKey="p50" stroke="#2563eb" strokeWidth={3} dot={false} name="50th Percentile (Median)" />
-                                            <Line type="monotone" dataKey="p75" stroke="#10b981" strokeWidth={2} dot={false} name="75th Percentile" />
-                                            <Line type="monotone" dataKey="p90" stroke="#059669" strokeWidth={2} dot={false} name="90th Percentile (Best)" />
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                    <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '12px', textAlign: 'center' }}>
-                                        Each line represents a different outcome probability. The median (blue) is the most likely outcome.
-                                    </div>
-                                </div>
-
-                                {/* Distribution Histogram */}
-                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Final Value Distribution</h3>
-                                    <ResponsiveContainer width="100%" height={300}>
-                                        <BarChart data={mcResults.distribution}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis dataKey="range" tick={{ fontSize: 10 }} interval={2} />
-                                            <YAxis label={{ value: 'Number of Simulations', angle: -90, position: 'insideLeft' }} />
-                                            <Tooltip />
-                                            <Bar dataKey="count" fill="#2563eb" />
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                    <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '12px', textAlign: 'center' }}>
-                                        Distribution shows how often each final value occurred across all {mcSimulations.toLocaleString()} simulations
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </>
+                        {/* Holdings Table */}
+                        <div>
+                            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Current Holdings</h3>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Ticker</th>
+                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Quantity</th>
+                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Price</th>
+                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Total Value</th>
+                                            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {portfolio.map((stock, index) => (
+                                            <tr key={index} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                <td style={{ padding: '12px' }}>{stock.ticker}</td>
+                                                <td style={{ padding: '12px', textAlign: 'right' }}>{Number(stock.quantity).toLocaleString()}</td>
+                                                <td style={{ padding: '12px', textAlign: 'right' }}>${Number(stock.price).toFixed(2)}</td>
+                                                <td style={{ padding: '12px', textAlign: 'right' }}>${(stock.quantity * stock.price).toLocaleString()}</td>
+                                                <td style={{ padding: '12px', textAlign: 'center' }}>
+                                                    <button
+                                                        onClick={() => setPortfolio(portfolio.filter((_, i) => i !== index))}
+                                                        style={{
+                                                            padding: '4px 8px',
+                                                            backgroundColor: '#ef4444',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '4px',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>
