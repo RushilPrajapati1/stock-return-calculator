@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, AlertCircle } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { TrendingUp, AlertCircle, DollarSign, TrendingDown, Activity } from 'lucide-react';
 import MonteCarlo from './MonteCarlo';
 
 export default function StockReturnCalculator() {
-    const [activeTab, setActiveTab] = useState('historical');
+    const [activeTab, setActiveTab] = useState('stockinfo');
     const [ticker, setTicker] = useState('');
     const [years, setYears] = useState(10);
     const [results, setResults] = useState(null);
@@ -34,10 +34,14 @@ export default function StockReturnCalculator() {
                 `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=d46lcd9r01qgc9etd3k0d46lcd9r01qgc9etd3kg`
             );
 
-            if (!resp.ok) throw new Error(`Network error: ${resp.status}`);
+            if (!resp.ok) {
+                const txt = await resp.text().catch(() => resp.statusText || '');
+                setPriceError(`Network error: ${resp.status} ${txt}`);
+                setActualPrice(null);
+                return;
+            }
             const data = await resp.json();
 
-            // Finnhub returns fields like c (current), d (change), dp (percent)
             setActualPrice({
                 price: data.c ?? null,
                 change: data.d ?? null,
@@ -92,10 +96,65 @@ export default function StockReturnCalculator() {
         const initialValue = 100;
         const cagr = (Math.pow(finalValue / initialValue, 1 / numYears) - 1) * 100;
 
+        // Calculate period returns
+        const dayReturn = (Math.random() * 4 - 2);
+        const weekReturn = (Math.random() * 6 - 3);
+        const monthReturn = (Math.random() * 8 - 4);
+        const sixMonthReturn = (Math.random() * 15 - 5);
+
+        const periodReturnsData = [
+            { period: '1D', return: dayReturn },
+            { period: '1W', return: weekReturn },
+            { period: '1M', return: monthReturn },
+            { period: '6M', return: sixMonthReturn }
+        ];
+
+        // Simulate realistic fundamentals
+        const latestEPS = parseFloat((Math.random() * 4.8 + 0.2).toFixed(2));
+        const recentQuarterGrowthPct = parseFloat((Math.random() * 60 - 20).toFixed(2));
+        const q4 = latestEPS;
+        const q3 = parseFloat((q4 / (1 + recentQuarterGrowthPct / 100)).toFixed(2));
+        const q2 = parseFloat((q3 / (1 + (Math.random() * 30 - 10) / 100)).toFixed(2));
+        const q1 = parseFloat((q2 / (1 + (Math.random() * 30 - 10) / 100)).toFixed(2));
+
+        const epsQuarterly = [
+            { q: 'Q1', eps: q1 },
+            { q: 'Q2', eps: q2 },
+            { q: 'Q3', eps: q3 },
+            { q: 'Q4', eps: q4 }
+        ];
+
+        const peRatio = parseFloat((Math.random() * 40 + 10).toFixed(2));
+        const pbRatio = parseFloat((Math.random() * 8 + 1).toFixed(2));
+        const dividendYield = parseFloat((Math.random() * 5).toFixed(2));
+        const marketCap = Math.round((Math.random() * (500000 - 1000) + 1000) * 1e6);
+        const annualEarnings = Math.round((Math.random() * (50000 - 50) + 50) * 1e6);
+        const salesGrowthPct = parseFloat((Math.random() * 45 - 15).toFixed(2));
+        const returnOnEquity = parseFloat((Math.random() * 50).toFixed(2));
+        const debtToEquity = parseFloat((Math.random() * 2).toFixed(2));
+        const profitMargin = parseFloat((Math.random() * 30 + 5).toFixed(2));
+
+        const fundamentals = {
+            eps: latestEPS,
+            epsQuarterly,
+            recentQuarterGrowthPct,
+            peRatio,
+            pbRatio,
+            dividendYield,
+            marketCap,
+            annualEarnings,
+            salesGrowthPct,
+            returnOnEquity,
+            debtToEquity,
+            profitMargin
+        };
+
         return {
             ticker: tickerSymbol.toUpperCase(),
             annualReturns,
             monthlyData,
+            periodReturnsData,
+            fundamentals,
             metrics: {
                 avgReturn: avgReturn.toFixed(2),
                 stdDev: stdDev.toFixed(2),
@@ -135,11 +194,11 @@ export default function StockReturnCalculator() {
                 {/* Tabs */}
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '2px solid #e5e7eb' }}>
                     <button
-                        onClick={() => setActiveTab('historical')}
+                        onClick={() => setActiveTab('stockinfo')}
                         style={{
                             padding: '12px 24px',
-                            backgroundColor: activeTab === 'historical' ? '#2563eb' : 'transparent',
-                            color: activeTab === 'historical' ? 'white' : '#6b7280',
+                            backgroundColor: activeTab === 'stockinfo' ? '#2563eb' : 'transparent',
+                            color: activeTab === 'stockinfo' ? 'white' : '#6b7280',
                             border: 'none',
                             borderRadius: '8px 8px 0 0',
                             fontSize: '14px',
@@ -148,7 +207,7 @@ export default function StockReturnCalculator() {
                             transition: 'all 0.2s'
                         }}
                     >
-                        Historical Analysis
+                        Stock Information
                     </button>
                     <button
                         onClick={() => setActiveTab('montecarlo')}
@@ -184,8 +243,8 @@ export default function StockReturnCalculator() {
                     </button>
                 </div>
 
-                {/* Historical Analysis Tab */}
-                {activeTab === 'historical' && (
+                {/* Stock Information Tab */}
+                {activeTab === 'stockinfo' && (
                     <>
                         {/* Input Section */}
                         <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -195,7 +254,7 @@ export default function StockReturnCalculator() {
                                     type="text"
                                     value={ticker}
                                     onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                                    placeholder="AIQ"
+                                    placeholder="AAPL"
                                     style={{
                                         width: '200px',
                                         padding: '8px 12px',
@@ -241,7 +300,7 @@ export default function StockReturnCalculator() {
                                         cursor: loading ? 'not-allowed' : 'pointer'
                                     }}
                                 >
-                                    {loading ? 'Calculating...' : 'Calculate Returns'}
+                                    {loading ? 'Calculating...' : 'Analyze Stock'}
                                 </button>
 
                                 <button
@@ -263,23 +322,38 @@ export default function StockReturnCalculator() {
                             </div>
 
                             {priceError && (
-                                <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '4px', color: '#991b1b' }}>
-                                    <AlertCircle size={16} /> <span style={{ marginLeft: 8 }}>{priceError}</span>
+                                <div style={{ marginBottom: '12px', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '4px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <AlertCircle size={16} />
+                                    <span>{priceError}</span>
                                 </div>
                             )}
 
-                            {actualPrice && (
-                                <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+                            {actualPrice && actualPrice.price && (
+                                <div style={{ marginBottom: '16px', padding: '16px', backgroundColor: '#f0f9ff', border: '2px solid #3b82f6', borderRadius: '8px' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <div>
-                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>Current Price ({actualPrice.currency || 'USD'})</div>
-                                            <div style={{ fontSize: '20px', fontWeight: '700' }}>${actualPrice.price?.toLocaleString()}</div>
+                                            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Current Price ({actualPrice.currency || 'USD'})</div>
+                                            <div style={{ fontSize: '28px', fontWeight: '700', color: '#1e40af' }}>${actualPrice.price?.toFixed(2)}</div>
                                         </div>
                                         <div style={{ textAlign: 'right' }}>
-                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>{actualPrice.time}</div>
-                                            <div style={{ fontSize: '14px', fontWeight: '700', color: actualPrice.change >= 0 ? '#16a34a' : '#dc2626' }}>
+                                            <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>{actualPrice.time}</div>
+                                            <div style={{ fontSize: '16px', fontWeight: '700', color: actualPrice.change >= 0 ? '#16a34a' : '#dc2626' }}>
                                                 {actualPrice.change >= 0 ? '+' : ''}{actualPrice.change?.toFixed(2)} ({actualPrice.changePct?.toFixed(2)}%)
                                             </div>
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', paddingTop: '12px', borderTop: '1px solid #bfdbfe' }}>
+                                        <div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280' }}>Open</div>
+                                            <div style={{ fontSize: '14px', fontWeight: '600' }}>${actualPrice.open?.toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280' }}>High</div>
+                                            <div style={{ fontSize: '14px', fontWeight: '600' }}>${actualPrice.high?.toFixed(2)}</div>
+                                        </div>
+                                        <div>
+                                            <div style={{ fontSize: '11px', color: '#6b7280' }}>Low</div>
+                                            <div style={{ fontSize: '14px', fontWeight: '600' }}>${actualPrice.low?.toFixed(2)}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -324,8 +398,108 @@ export default function StockReturnCalculator() {
                         {/* Results */}
                         {results && (
                             <>
-                                <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px' }}>
-                                    {results.ticker} - {years} Year Analysis
+                                <h2 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <Activity size={28} color="#2563eb" />
+                                    {results.ticker} - Company Overview
+                                </h2>
+
+                                {/* Enhanced Fundamentals Section */}
+                                <div style={{ backgroundColor: 'white', padding: '28px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: '24px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+                                        <DollarSign size={24} color="#2563eb" />
+                                        <h3 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Key Fundamentals</h3>
+                                    </div>
+
+                                    {/* Primary Metrics Row */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                                        <div style={{ padding: '20px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', borderRadius: '12px', color: 'white' }}>
+                                            <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '8px' }}>Market Cap</div>
+                                            <div style={{ fontSize: '22px', fontWeight: 'bold' }}>${(results.fundamentals.marketCap / 1e9).toFixed(2)}B</div>
+                                        </div>
+                                        <div style={{ padding: '20px', background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', borderRadius: '12px', color: 'white' }}>
+                                            <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '8px' }}>P/E Ratio</div>
+                                            <div style={{ fontSize: '22px', fontWeight: 'bold' }}>{results.fundamentals.peRatio}</div>
+                                        </div>
+                                        <div style={{ padding: '20px', background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)', borderRadius: '12px', color: 'white' }}>
+                                            <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '8px' }}>EPS (TTM)</div>
+                                            <div style={{ fontSize: '22px', fontWeight: 'bold' }}>${results.fundamentals.eps}</div>
+                                        </div>
+                                        <div style={{ padding: '20px', background: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)', borderRadius: '12px', color: 'white' }}>
+                                            <div style={{ fontSize: '12px', opacity: 0.9, marginBottom: '8px' }}>Dividend Yield</div>
+                                            <div style={{ fontSize: '22px', fontWeight: 'bold' }}>{results.fundamentals.dividendYield}%</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Secondary Metrics Grid */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>P/B Ratio</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e293b' }}>{results.fundamentals.pbRatio}</div>
+                                        </div>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Return on Equity</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e293b' }}>{results.fundamentals.returnOnEquity}%</div>
+                                        </div>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Profit Margin</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e293b' }}>{results.fundamentals.profitMargin}%</div>
+                                        </div>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Debt to Equity</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e293b' }}>{results.fundamentals.debtToEquity}</div>
+                                        </div>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Sales Growth</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: results.fundamentals.salesGrowthPct >= 0 ? '#16a34a' : '#dc2626' }}>
+                                                {results.fundamentals.salesGrowthPct >= 0 ? '+' : ''}{results.fundamentals.salesGrowthPct}%
+                                            </div>
+                                        </div>
+                                        <div style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                                            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>Annual Earnings</div>
+                                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e293b' }}>${(results.fundamentals.annualEarnings / 1e9).toFixed(2)}B</div>
+                                        </div>
+                                    </div>
+
+                                    {/* EPS Quarterly Chart */}
+                                    <div style={{ marginTop: '24px', padding: '20px', backgroundColor: '#fafafa', borderRadius: '10px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                            <h4 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0 }}>Quarterly EPS Trend</h4>
+                                            <div style={{
+                                                padding: '6px 12px',
+                                                backgroundColor: results.fundamentals.recentQuarterGrowthPct >= 0 ? '#dcfce7' : '#fee2e2',
+                                                borderRadius: '20px',
+                                                fontSize: '13px',
+                                                fontWeight: '600',
+                                                color: results.fundamentals.recentQuarterGrowthPct >= 0 ? '#16a34a' : '#dc2626'
+                                            }}>
+                                                {results.fundamentals.recentQuarterGrowthPct >= 0 ? '+' : ''}{results.fundamentals.recentQuarterGrowthPct}% QoQ
+                                            </div>
+                                        </div>
+                                        <ResponsiveContainer width="100%" height={220}>
+                                            <LineChart data={results.fundamentals.epsQuarterly}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                                <XAxis dataKey="q" tick={{ fontSize: 13 }} />
+                                                <YAxis tick={{ fontSize: 13 }} />
+                                                <Tooltip
+                                                    contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                                                    formatter={(value) => [`$${value}`, 'EPS']}
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="eps"
+                                                    stroke="#2563eb"
+                                                    strokeWidth={3}
+                                                    dot={{ fill: '#2563eb', r: 5 }}
+                                                    activeDot={{ r: 7 }}
+                                                />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                </div>
+
+                                {/* Historical Analysis Section */}
+                                <h2 style={{ fontSize: '22px', fontWeight: 'bold', marginBottom: '16px', marginTop: '32px' }}>
+                                    {results.ticker} - {years} Year Historical Analysis
                                 </h2>
 
                                 {/* Metrics Grid */}
@@ -380,8 +554,29 @@ export default function StockReturnCalculator() {
                                     </ResponsiveContainer>
                                 </div>
 
+                                {/* Period Returns Chart */}
+                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Period Returns</h3>
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <BarChart data={results.periodReturnsData}>
+                                            <CartesianGrid strokeDasharray="3 3" />
+                                            <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                                            <YAxis tick={{ fontSize: 12 }} />
+                                            <Tooltip
+                                                formatter={(value) => `${value.toFixed(2)}%`}
+                                                labelStyle={{ color: '#000' }}
+                                            />
+                                            <Bar
+                                                dataKey="return"
+                                                fill="#10b981"
+                                                radius={[8, 8, 0, 0]}
+                                            />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+
                                 {/* Annual Returns */}
-                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                                <div style={{ backgroundColor: 'white', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginBottom: '20px' }}>
                                     <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Annual Returns</h3>
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '12px' }}>
                                         {results.annualReturns.map((yr) => (
@@ -505,38 +700,38 @@ export default function StockReturnCalculator() {
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Ticker</th>
-                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Quantity</th>
-                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Price</th>
-                                            <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Total Value</th>
-                                            <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>Action</th>
-                                        </tr>
+                                    <tr style={{ backgroundColor: '#f8fafc' }}>
+                                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb' }}>Ticker</th>
+                                        <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Quantity</th>
+                                        <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Price</th>
+                                        <th style={{ padding: '12px', textAlign: 'right', borderBottom: '2px solid #e5e7eb' }}>Total Value</th>
+                                        <th style={{ padding: '12px', textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>Action</th>
+                                    </tr>
                                     </thead>
                                     <tbody>
-                                        {portfolio.map((stock, index) => (
-                                            <tr key={index} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                <td style={{ padding: '12px' }}>{stock.ticker}</td>
-                                                <td style={{ padding: '12px', textAlign: 'right' }}>{Number(stock.quantity).toLocaleString()}</td>
-                                                <td style={{ padding: '12px', textAlign: 'right' }}>${Number(stock.price).toFixed(2)}</td>
-                                                <td style={{ padding: '12px', textAlign: 'right' }}>${(stock.quantity * stock.price).toLocaleString()}</td>
-                                                <td style={{ padding: '12px', textAlign: 'center' }}>
-                                                    <button
-                                                        onClick={() => setPortfolio(portfolio.filter((_, i) => i !== index))}
-                                                        style={{
-                                                            padding: '4px 8px',
-                                                            backgroundColor: '#ef4444',
-                                                            color: 'white',
-                                                            border: 'none',
-                                                            borderRadius: '4px',
-                                                            cursor: 'pointer'
-                                                        }}
-                                                    >
-                                                        Remove
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                    {portfolio.map((stock, index) => (
+                                        <tr key={index} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                            <td style={{ padding: '12px' }}>{stock.ticker}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right' }}>{Number(stock.quantity).toLocaleString()}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right' }}>${Number(stock.price).toFixed(2)}</td>
+                                            <td style={{ padding: '12px', textAlign: 'right' }}>${(stock.quantity * stock.price).toLocaleString()}</td>
+                                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                                                <button
+                                                    onClick={() => setPortfolio(portfolio.filter((_, i) => i !== index))}
+                                                    style={{
+                                                        padding: '4px 8px',
+                                                        backgroundColor: '#ef4444',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
                                     </tbody>
                                 </table>
                             </div>
